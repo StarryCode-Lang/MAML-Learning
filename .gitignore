@@ -2,3 +2,4 @@ miniimagenet
 .idea
 __pycache__
 omniglot
+omniglot/omniglot.npy
