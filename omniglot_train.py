@@ -2,6 +2,7 @@ import  torch, os
 import  numpy as np
 from    omniglotNShot import OmniglotNShot
 import  argparse
+import  time
 
 from    meta import Meta
 
@@ -16,6 +17,11 @@ def main(args):
     torch.backends.cudnn.allow_tf32 = True
 
     print(args)
+
+    try:
+        torch.set_float32_matmul_precision('high')
+    except AttributeError:
+        pass
 
     config = [
         ('conv2d', [64, 1, 3, 3, 2, 0]),
@@ -49,34 +55,55 @@ def main(args):
                        k_query=args.k_qry,
                        imgsz=args.imgsz)
 
+    log_interval = 100
+    steps_since_log = 0
+    tot_elapsed = 0.0
+
     for step in range(args.epoch):
 
+        step_start = time.perf_counter()
         x_spt, y_spt, x_qry, y_qry = db_train.next()
-        x_spt, y_spt, x_qry, y_qry = torch.from_numpy(x_spt).to(device), torch.from_numpy(y_spt).to(device), \
-                                     torch.from_numpy(x_qry).to(device), torch.from_numpy(y_qry).to(device)
+        x_spt = torch.from_numpy(x_spt).pin_memory().to(device, non_blocking=True)
+        y_spt = torch.from_numpy(y_spt).pin_memory().to(device, non_blocking=True)
+        x_qry = torch.from_numpy(x_qry).pin_memory().to(device, non_blocking=True)
+        y_qry = torch.from_numpy(y_qry).pin_memory().to(device, non_blocking=True)
 
         # set traning=True to update running_mean, running_variance, bn_weights, bn_bias
         accs = maml(x_spt, y_spt, x_qry, y_qry)
 
-        if step % 50 == 0:
-            print('step:', step, '\ttraining acc:', accs)
+        step_elapsed = time.perf_counter() - step_start
+        tot_elapsed += step_elapsed
+        steps_since_log += 1
+
+        if step % log_interval == 0:
+            avg_step_time = tot_elapsed / max(steps_since_log, 1)
+            setsz = x_spt.size(1)
+            querysz = x_qry.size(1)
+            images = (setsz + querysz) * args.task_num
+            print('step:', step, '\ttraining acc:', accs, '\tavg_time/step(s):', round(avg_step_time, 4), '\tthroughput(img/s):', round(images/avg_step_time, 1))
+            tot_elapsed = 0.0
+            steps_since_log = 0
 
         if step % 1000 == 0:
+            eval_start = time.perf_counter()
             accs = []
             for _ in range(1000//args.task_num):
                 # test
                 x_spt, y_spt, x_qry, y_qry = db_train.next('test')
-                x_spt, y_spt, x_qry, y_qry = torch.from_numpy(x_spt).to(device), torch.from_numpy(y_spt).to(device), \
-                                             torch.from_numpy(x_qry).to(device), torch.from_numpy(y_qry).to(device)
+                x_spt = torch.from_numpy(x_spt).pin_memory().to(device, non_blocking=True)
+                y_spt = torch.from_numpy(y_spt).pin_memory().to(device, non_blocking=True)
+                x_qry = torch.from_numpy(x_qry).pin_memory().to(device, non_blocking=True)
+                y_qry = torch.from_numpy(y_qry).pin_memory().to(device, non_blocking=True)
 
                 # split to single task each time
                 for x_spt_one, y_spt_one, x_qry_one, y_qry_one in zip(x_spt, y_spt, x_qry, y_qry):
                     test_acc = maml.finetunning(x_spt_one, y_spt_one, x_qry_one, y_qry_one)
-                    accs.append( test_acc )
+                    accs.append(test_acc)
 
             # [b, update_step+1]
             accs = np.array(accs).mean(axis=0).astype(np.float16)
-            print('Test acc:', accs)
+            eval_elapsed = time.perf_counter() - eval_start
+            print('Test acc:', accs, '\teval_time(s):', round(eval_elapsed, 2))
 
 
 if __name__ == '__main__':
