@@ -56,9 +56,8 @@
 10. ![img](res/compare.png)
 
 11. **Meta-Learning（元学习 / learn to learn）**：常见的深度学习模型，目的是学习一个用于预测的数学模型。而元学习面向的不是学习的结果，而是学习的过程。其学习的不是一个直接用于预测的数学模型，而是学习“如何更快更好地学习一个数学模型”。例：一个一个的学单词的发音
-
+![alt text](res/meta-learning.png)
     分类：
-
     - learning good weight initializations：**MAML**，学习一个好的初始化权重，从而在新任务上实现fast adaptation，即在小规模的训练样本上迅速收敛并完成fine-tune。可以理解成提供一个**meta-learner**用于训练base-learner的框架
     - meta-models that generate the parameters of other models
     - learning transferable optimizers
@@ -75,6 +74,7 @@
     4. ${meta-train classes}$ ： $C_1 \sim C_{10}$ 
     5. ${meta-test classes}$ ： $P_1 \sim P_5$ 
     6. task $\mathcal{T}$  训练定位：相当于普通深度学习模型训练过程中的一条训练数据。那我们肯定要组成一个 batch ，才能做随机梯度下降 SGD* 对不对？所以我们反复在训练数据分布中抽取若干个这样的 task $ \mathcal{T} $ ，组成一个batch。在训练 $M_{fine-tune}$ 阶段，task、support set、query set的含义与训练 $M_{meta}$ 阶段均相同。
+    ![alt text](res/dataset.png)
 
 14. 
 
@@ -146,68 +146,32 @@
 
    $\theta \leftarrow \theta - \frac{\alpha}{n} \nabla_\theta \sum_i \mathcal{L}_{\tau_i}(\theta)$ ，$n$ ：采样的任务数。
 
-3. 预训练模型的实现（TensorFlow代码解析）
+3. 预训练模型（简化版元学习）的核心缺陷 + MAML 的必要性：预训练模型试图用**一个通用的\( \theta \)** 直接适配所有任务（不做任何微调），自然无法兼顾冲突的任务。
 
-   ```python
-   import torch
-   import torch.nn.functional as F
-   
-   def update_pretrained(model, optimizer, batch):
-       """
-       执行预训练模型的单步更新。
-       参数说明：
-       - model: 待训练的PyTorch模型（权重对应元参数θ）
-       - optimizer: PyTorch优化器（如Adam、SGD）
-       - batch: 采样任务的批量数据，形状为(nTasks, nSamples)
-                其中每个样本是 (标签, 输入) 的元组
-       """
-       # 定义单个任务的损失计算函数
-       def task_loss(task_batch):
-           y_train, x_train = task_batch  # 拆分单个任务的标签和输入
-           # 前向传播计算预测值，MSE损失（对应原代码的mse：损失函数）
-           y_pred = model(x_train)
-           return F.mse_loss(y_pred, y_train)  # 也可替换为交叉熵等其他损失
-       
-       # 初始化总损失
-       total_loss = torch.tensor(0.0, device=next(model.parameters()).device)
-       
-       # 遍历批量中的每个任务，计算损失并累加
-       for task_batch in batch:
-           task_batch_loss = task_loss(task_batch)
-           total_loss += task_batch_loss
-       
-       # 反向传播+参数更新（PyTorch核心流程）
-       optimizer.zero_grad()  # 清空之前的梯度
-       total_loss.backward()  # 计算损失对模型权重的梯度
-       optimizer.step()       # 更新模型权重（元参数θ）
-   ```
+   1. 符号定义：微调步数 $m$ ，MAML 的原始优化目标是： $\min_\theta \mathbb{E}_\tau[\mathcal{L}_\tau(U_\tau(\theta))]$
 
-4. 预训练模型（简化版元学习）的核心缺陷 + MAML 的必要性：预训练模型试图用**一个通用的\( \theta \)** 直接适配所有任务（不做任何微调），自然无法兼顾冲突的任务。
-
-   1. 符号定义：微调步数\( m \)，MAML的原始优化目标是：  \( \min_\theta \mathbb{E}_\tau[\mathcal{L}_\tau(U_\tau(\theta))] \)  
-
-      - 把“微调步骤”显式标注为\( m \)：\( U_\tau^{(m)}(\theta) \)（表示对元参数\( \theta \)做\( m \)步梯度下降微调，得到适配任务\( \tau \)的参数）；对预训练模型的简化，令\( m=0 \)（**完全不做微调**），此时\( U_\tau^{(0)}(\theta) = \theta \)（直接用元参数\( \theta \)预测）。**和少样本元学习 “用少量数据微调初始值” 的核心诉求完全背离。**
+      - 把“微调步骤”显式标注为 $m$ ： $U_\tau^{(m)}(\theta)$ （表示对元参数 $\theta$ 做 $m$ 步梯度下降微调，得到适配任务 $\tau$ 的参数）；对预训练模型的简化，令 $ m=0$ （**完全不做微调**），此时 $U_\tau^{(0)}(\theta) = \theta$ （直接用元参数 $\theta$ 预测）。**和少样本元学习 “用少量数据微调初始值” 的核心诉求完全背离。**
 
    2. 损失空间的关键差异
 
-      | 模型类型          | 损失空间（优化目标）                                    | 本质                           |
-      | ----------------- | ------------------------------------------------------- | ------------------------------ |
-      | 预训练模型（m=0） | \( \sum_i \mathcal{L}_{\tau_i}(\theta) \)               | 所有任务损失“直接求和”，无微调 |
-      | 真实元学习（m>0） | \( \sum_i \mathcal{L}_{\tau_i}(U_\tau^{(m)}(\theta)) \) | 每个任务先微调，再算损失求和   |
+      | 模型类型          | 损失空间（优化目标）                                  | 本质                        |
+      | ---------------- | --------------------------------------------------- | --------------------------- |
+      | 预训练模型（m=0） | $\sum_i \mathcal{L}_{\tau_i}(\theta) $              | 所有任务损失“直接求和”，无微调 |
+      | 真实元学习（m>0） | $\sum_i \mathcal{L}_{\tau_i}(U_\tau^{(m)}(\theta))$ | 每个任务先微调，再算损失求和   |
 
    3. 核心结论：预训练模型的缺陷 & MAML的必要性
 
       1. **预训练模型的核心问题**：
-         - 忽略微调步骤\( U_\tau \)（m=0），试图用一个“通用\( \theta \)”直接适配所有任务，但冲突任务（如\( f_1=-f_2 \)）的存在，导致这样的\( \theta \)要么不存在，要么极难找到；
-         - 简化后的损失空间和“真实少样本元学习的损失空间”偏差极大，得到的\( \theta \)无法作为“优质初始值”。
+         - 忽略微调步骤 $U_\tau$ （m=0），试图用一个“通用 $\theta$ ”直接适配所有任务，但冲突任务（如 $f_1=-f_2$ ）的存在，导致这样的 $\theta$ 要么不存在，要么极难找到；
+         - 简化后的损失空间和“真实少样本元学习的损失空间”偏差极大，得到的 $\theta$ 无法作为“优质初始值”。
 
-      2. **过渡到MAML的逻辑**：
-         - 预训练模型仅能作为“基线”（用来对比），而MAML的核心价值是**不忽略微调步骤\( U_\tau \)** ——把“微调后任务损失最小”纳入优化目标，直接优化“适配微调的初始\( \theta \)”；
-         - 这也是为什么MAML能解决少样本元学习问题，而预训练模型不行。
+      2. **过渡到MAML的逻辑**： 
+         - 预训练模型仅能作为“基线”（用来对比），而 MAML 的核心价值是**不忽略微调步骤 $U_\tau$** ——把“微调后任务损失最小”纳入优化目标，直接优化“适配微调的初始 $\theta$ ”；
+         - 这也是为什么 MAML 能解决少样本元学习问题，而预训练模型不行。
 
 #### Part 2: Model-Agnostic Meta-Learning
 
-  \( \sum_i \mathcal{L}_{\tau_i}(U_\tau^{(m)}(\theta)) \) 在优化方式与预训练模型相同 \( \theta \) 之余，在优化策略中，承认微调函数\( U_\tau \)对累积损耗空间的影响。
+  $\sum_i \mathcal{L}_{\tau_i}(U_\tau^{(m)}(\theta))$ 在优化方式与预训练模型相同 $\theta$ 之余，在优化策略中，承认微调函数 $U_\tau$ 对累积损耗空间的影响。
 
 ##### 算法概述：给定当前的**元参数**$θ$，执行了两次梯度下降：
 
@@ -319,6 +283,10 @@ def update_maml(model, optimizer, inner_lr, batch):
     total_loss.backward()  # 对总损失求导（包含内层微调的计算图）
     optimizer.step()
 ```
+##### 算法实例讲解
+首先我们选择两个任务，分别是 bird 和 deer 分类器，定义为 task1 和 task2 然后我们在内部优化的过程中，选择支持集进行第一步 θ 更新，我们发现，φt1 是任务1的更新方向，φt2 是任务2的更新方向，完成内部优化过程。
+![img](res/maml-example.png)
+
 
 # Reference
 
@@ -326,3 +294,6 @@ def update_maml(model, optimizer, inner_lr, batch):
 2. https://zhuanlan.zhihu.com/p/57864886
 3. https://zhuanlan.zhihu.com/p/343827171
 4. https://zhuanlan.zhihu.com/p/181709693
+5. https://blog.csdn.net/qq_36317312/article/details/121337989?
+6. https://juejin.cn/post/7090902570683596813
+7. [C. Finn, P. Abbeel, and S. Levine, “Model-agnostic meta-learning for fast adaptation of deep networks,” arXiv Preprint arXiv:1703.03400, 2017.](https://arxiv.org/pdf/1703.03400)
