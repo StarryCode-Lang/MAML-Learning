@@ -10,27 +10,27 @@ class OmniglotNShot:
     def __init__(self, root, batchsz, n_way, k_shot, k_query, imgsz):
         """
         Different from mnistNShot, the
-        :param root:
-        :param batchsz: task num
-        :param n_way:
-        :param k_shot:
-        :param k_qry:
-        :param imgsz:
+        :param root: 数据集存储路径
+        :param batchsz: 每个批次的任务数量
+        :param n_way: 每次任务中的类别数量
+        :param k_shot: 每个类别在支持集中的样本数量
+        :param k_qry: 每个类别在查询集中的样本数量
+        :param imgsz: 图像尺寸
         """
 
         self.resize = imgsz
         if not os.path.isfile(os.path.join(root, 'omniglot.npy')):
-            # if root/data.npy does not exist, just download it
+            # 如果root/data.npy不存在，就下载   
             self.x = Omniglot(root, download=True,
-                              transform=transforms.Compose([lambda x: Image.open(x).convert('L'),
-                                                            lambda x: x.resize((imgsz, imgsz)),
-                                                            lambda x: np.reshape(x, (imgsz, imgsz, 1)),
-                                                            lambda x: np.transpose(x, [2, 0, 1]),
-                                                            lambda x: x/255.])
+                              transform=transforms.Compose([lambda x: Image.open(x).convert('L'),  # 打开图像并转换为灰度图
+                                                            lambda x: x.resize((imgsz, imgsz)),  # 调整图像大小
+                                                            lambda x: np.reshape(x, (imgsz, imgsz, 1)),  # 重塑形状
+                                                            lambda x: np.transpose(x, [2, 0, 1]),  # 将通道维度移到前面（CHW格式）
+                                                            lambda x: x/255.])  # 像素值归一化到[0,1]
                               )
 
             temp = dict()  # {label:img1, img2..., 20 imgs, label2: img1, img2,... in total, 1623 label}
-            for (img, label) in self.x:
+            for (img, label) in self.x:  # 触发Omniglot的__getitem__的调用
                 if label in temp.keys():
                     temp[label].append(img)
                 else:
