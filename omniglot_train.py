@@ -84,9 +84,15 @@ def main(args):
     maml = Meta(args, config).to(device)
 
     # 添加学习率调度器
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        maml.meta_optim, mode='max', factor=0.5, patience=5000, verbose=True
-    )
+    try:
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            maml.meta_optim, mode='max', factor=0.5, patience=5000
+        )
+    except TypeError:
+        # 如果verbose参数不可用，则不使用它
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            maml.meta_optim, mode='max', factor=0.5, patience=5000
+        )
 
     tmp = filter(lambda x: x.requires_grad, maml.parameters())
     num = sum(map(lambda x: np.prod(x.shape), tmp))
@@ -108,6 +114,18 @@ def main(args):
     best_test_acc = 0.0
     steps_without_improvement = 0
     patience = 10000  # 容忍的步数
+
+    # 预热：让CUDA准备就绪
+    print("开始预热...")
+    for warmup_step in range(5):
+        x_spt, y_spt, x_qry, y_qry = db_train.next()
+        x_spt = torch.from_numpy(x_spt).pin_memory().to(device, non_blocking=True)
+        y_spt = torch.from_numpy(y_spt).pin_memory().to(device, non_blocking=True)
+        x_qry = torch.from_numpy(x_qry).pin_memory().to(device, non_blocking=True)
+        y_qry = torch.from_numpy(y_qry).pin_memory().to(device, non_blocking=True)
+        
+        accs = maml(x_spt, y_spt, x_qry, y_qry)
+    print("预热完成")
 
     for step in range(args.epoch):
 
@@ -134,7 +152,7 @@ def main(args):
             tot_elapsed = 0.0
             steps_since_log = 0
 
-        if step % 500 == 0:
+        if step % 1000 == 0:  # 增加评估间隔，从500增加到1000
             current_acc, accs, eval_elapsed, save_path = evaluate_model(
                 maml, db_train, device, args, sample_num=1000//args.task_num, step=step
             )
@@ -156,7 +174,7 @@ def main(args):
                     })
                     print(f'\n✓ 发现更好的模型: step={step}, acc={current_acc:.4f}\n')
             else:
-                steps_without_improvement += 500
+                steps_without_improvement += 1000
             
             print('Test acc:','[',  ' '.join([f'{x:.4f}' for x in accs]), ']', f'\teval_time(s): {round(eval_elapsed, 2)}')
             
