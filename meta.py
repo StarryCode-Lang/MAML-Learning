@@ -83,8 +83,11 @@ class Meta(nn.Module):
             # 1. run the i-th task and compute loss for k=0
             logits = self.net(x_spt[i], vars=None, bn_training=True)
             loss = F.cross_entropy(logits, y_spt[i])
-            grad = torch.autograd.grad(loss, self.net.parameters())
-            fast_weights = list(map(lambda p: p[1] - self.update_lr * p[0], zip(grad, self.net.parameters())))
+            grad = torch.autograd.grad(loss, self.net.parameters(), allow_unused=True, retain_graph=True, create_graph=True)
+
+            # 过滤掉None梯度
+            filtered_grad = [g if g is not None else torch.zeros_like(p) for g, p in zip(grad, self.net.parameters())]
+            fast_weights = list(map(lambda p: p[1] - self.update_lr * p[0], zip(filtered_grad, self.net.parameters())))
 
             # this is the loss and accuracy before first update
             with torch.no_grad():
@@ -113,9 +116,11 @@ class Meta(nn.Module):
                 logits = self.net(x_spt[i], fast_weights, bn_training=True)
                 loss = F.cross_entropy(logits, y_spt[i])
                 # 2. compute grad on theta_pi
-                grad = torch.autograd.grad(loss, fast_weights)
+                grad = torch.autograd.grad(loss, fast_weights, allow_unused=True, retain_graph=True, create_graph=True)
+                # 过滤掉None梯度
+                filtered_grad = [g if g is not None else torch.zeros_like(p) for g, p in zip(grad, fast_weights)]
                 # 3. theta_pi = theta_pi - train_lr * grad
-                fast_weights = list(map(lambda p: p[1] - self.update_lr * p[0], zip(grad, fast_weights)))
+                fast_weights = list(map(lambda p: p[1] - self.update_lr * p[0], zip(filtered_grad, fast_weights)))
 
                 logits_q = self.net(x_qry[i], fast_weights, bn_training=True)
                 # loss_q will be overwritten and just keep the loss_q on last update step.
@@ -136,6 +141,10 @@ class Meta(nn.Module):
         # optimize theta parameters
         self.meta_optim.zero_grad()
         loss_q.backward()
+        
+        # 添加梯度裁剪
+        torch.nn.utils.clip_grad_norm_(self.net.parameters(), max_norm=1.0)
+        
         # print('meta update')
         # for p in self.net.parameters()[:5]:
         # 	print(torch.norm(p).item())

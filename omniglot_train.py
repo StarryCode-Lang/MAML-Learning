@@ -83,6 +83,11 @@ def main(args):
     device = torch.device('cuda')
     maml = Meta(args, config).to(device)
 
+    # 添加学习率调度器
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        maml.meta_optim, mode='max', factor=0.5, patience=5000, verbose=True
+    )
+
     tmp = filter(lambda x: x.requires_grad, maml.parameters())
     num = sum(map(lambda x: np.prod(x.shape), tmp))
     print(maml)
@@ -98,6 +103,11 @@ def main(args):
     log_interval = 100
     steps_since_log = 0
     tot_elapsed = 0.0
+
+    # 添加性能追踪变量
+    best_test_acc = 0.0
+    steps_without_improvement = 0
+    patience = 10000  # 容忍的步数
 
     for step in range(args.epoch):
 
@@ -128,17 +138,33 @@ def main(args):
             current_acc, accs, eval_elapsed, save_path = evaluate_model(
                 maml, db_train, device, args, sample_num=1000//args.task_num, step=step
             )
-            
-            if not hasattr(maml, 'best_acc') or current_acc > maml.best_acc:
-                maml.best_acc = current_acc
-                saved_checkpoints.append({
-                    'path': save_path,
-                    'step': step,
-                    'accuracy': current_acc
-                })
-                print(f'\n✓ 发现更好的模型: step={step}, acc={current_acc:.4f}\n')
 
+            # 更新学习率调度器
+            scheduler.step(current_acc)
+            
+            # 跟踪最佳性能
+            if current_acc > best_test_acc:
+                best_test_acc = current_acc
+                steps_without_improvement = 0
+                
+                if not hasattr(maml, 'best_acc') or current_acc > maml.best_acc:
+                    maml.best_acc = current_acc
+                    saved_checkpoints.append({
+                        'path': save_path,
+                        'step': step,
+                        'accuracy': current_acc
+                    })
+                    print(f'\n✓ 发现更好的模型: step={step}, acc={current_acc:.4f}\n')
+            else:
+                steps_without_improvement += 500
+            
             print('Test acc:','[',  ' '.join([f'{x:.4f}' for x in accs]), ']', f'\teval_time(s): {round(eval_elapsed, 2)}')
+            
+            # 早停机制
+            if steps_without_improvement >= patience:
+                print(f"\n早停触发：连续{patience}步没有性能提升")
+                print(f"最佳准确率: {best_test_acc:.4f}")
+                break
             
     # 训练结束后，进行最终评估
     print('\n--- 进行最终评估 ---')

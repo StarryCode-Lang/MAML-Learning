@@ -23,6 +23,9 @@ class OmniglotNShot:
             # 如果root/data.npy不存在，就下载   
             self.x = Omniglot(root, download=True,
                               transform=transforms.Compose([lambda x: Image.open(x).convert('L'),  # 打开图像并转换为灰度图
+                                                            # 添加数据增强
+                                                            transforms.RandomRotation(degrees=5),
+                                                            transforms.RandomAffine(degrees=0, translate=(0.05, 0.05)),
                                                             lambda x: x.resize((imgsz, imgsz)),  # 调整图像大小
                                                             lambda x: np.reshape(x, (imgsz, imgsz, 1)),  # 重塑形状
                                                             lambda x: np.transpose(x, [2, 0, 1]),  # 将通道维度移到前面（CHW格式）
