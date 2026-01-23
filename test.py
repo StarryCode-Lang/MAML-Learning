@@ -10,7 +10,7 @@ class Net(nn.Module):
         self.a = nn.ParameterList([nn.Parameter(torch.zeros(3, 4))])
         b = [torch.ones(2, 3), torch.ones(2, 3)]
         for i in range(2):
-            self.register_buffer('b%d' % i, b[i])
+            self.register_buffer("b%d" % i, b[i])
 
     def forward(self, input):
         return self.a[0]
@@ -28,11 +28,11 @@ class MAML(nn.Module):
 
 
 def main():
-    device = torch.device('cuda')
+    device = torch.device("cuda")
     maml = MAML().to(device)
     print(maml.net.a)
     print(maml.net.b0)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
