@@ -1,8 +1,7 @@
-import  torch.utils.data as data
-import  os
-import  os.path
-import  errno
-
+import torch.utils.data as data
+import os
+import os.path
+import errno
 
 class Omniglot(data.Dataset):
     urls = [
@@ -57,7 +56,7 @@ class Omniglot(data.Dataset):
                os.path.exists(os.path.join(self.root, self.processed_folder, "images_background"))
 
     def download(self):
-        from six.moves import urllib
+        import urllib.request  # 使用Python 3自带的urllib
         import zipfile
 
         if self._check_exists():
