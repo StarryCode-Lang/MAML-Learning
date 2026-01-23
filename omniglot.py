@@ -1,29 +1,17 @@
 import torch.utils.data as data
 import os
 import os.path
-import errno
 
 
-class Omniglot(data.Dataset):
-    urls = [
-        "https://github.com/brendenlake/omniglot/raw/master/python/images_background.zip",
-        "https://github.com/brendenlake/omniglot/raw/master/python/images_evaluation.zip",
-    ]
+class Omniglot(data.Dataset):  # 所有数据集的基类,需要实现getitem、len和init三个基本方法
+
     raw_folder = "raw"  # 定义原始数据存放目录
     processed_folder = "processed"  # 定义处理后数据存放目录
     training_file = "training.pt"
     test_file = "test.pt"
 
-    """
-    The items are (filename,category). The index of all the categories can be found in self.idx_classes
-    Args:
-    - root: the directory where the dataset will be stored
-    - transform: how to transform the input
-    - target_transform: how to transform the target
-    - download: need to download the dataset
-    """
-
     def __init__(self, root, transform=None, target_transform=None, download=False):
+        # 把参数值保存为实例属性，这些值在其他方法中会被使用，保持实例状态的一致性
         self.root = root  # 数据集存储路径
         self.transform = transform  # 对输入图像的变换操作
         self.target_transform = target_transform  # 对标签的变换操作
@@ -39,14 +27,15 @@ class Omniglot(data.Dataset):
         self.all_items = find_classes(os.path.join(self.root, self.processed_folder))
         self.idx_classes = index_classes(self.all_items)
 
+    # 获取指定索引的数据项
     def __getitem__(self, index):
-        filename = self.all_items[index][0]
-        img = str.join("/", [self.all_items[index][2], filename])
+        filename = self.all_items[index][0]  # all_items：(文件名,类别,路径)
+        img = os.path.join(self.all_items[index][2], filename)  # 构建完整文件路径
 
         target = self.idx_classes[self.all_items[index][1]]
-        if self.transform is not None:
+        if self.transform is not None:  # 如果提供了图像变换函数，则应用到图像上
             img = self.transform(img)
-        if self.target_transform is not None:
+        if self.target_transform is not None:  # 如果提供了标签变换函数，则应用到标签上
             target = self.target_transform(target)
 
         return img, target
@@ -62,20 +51,13 @@ class Omniglot(data.Dataset):
         )
 
     def download(self):
-        import urllib.request  # 使用Python 3自带的urllib
         import zipfile
 
         if self._check_exists():
             return
 
-        try:
-            os.makedirs(os.path.join(self.root, self.raw_folder))
-            os.makedirs(os.path.join(self.root, self.processed_folder))
-        except OSError as e:
-            if e.errno == errno.EEXIST:
-                pass
-            else:
-                raise
+        os.makedirs(os.path.join(self.root, self.raw_folder), exist_ok=True)
+        os.makedirs(os.path.join(self.root, self.processed_folder), exist_ok=True)
 
         raw_path = os.path.join(self.root, self.raw_folder)
         processed_path = os.path.join(self.root, self.processed_folder)
@@ -83,25 +65,11 @@ class Omniglot(data.Dataset):
         local_eval = os.path.join(raw_path, "images_evaluation.zip")
         if os.path.exists(local_bg) and os.path.exists(local_eval):
             for file_path in [local_bg, local_eval]:
-                print("== Unzip from " + file_path + " to " + processed_path)
-                zip_ref = zipfile.ZipFile(file_path, "r")  # 解压
-                zip_ref.extractall(processed_path)
-                zip_ref.close()
+                print(f"== Unzip from {file_path} to {processed_path}")
+                with zipfile.ZipFile(file_path, "r") as zip_ref:
+                    zip_ref.extractall(processed_path)
             print("Local dataset found. Extraction finished.")
             return
-
-        for url in self.urls:
-            print("== Downloading " + url)
-            data = urllib.request.urlopen(url)
-            filename = url.rpartition("/")[2]
-            file_path = os.path.join(raw_path, filename)
-            with open(file_path, "wb") as f:
-                f.write(data.read())
-            print("== Unzip from " + file_path + " to " + processed_path)
-            zip_ref = zipfile.ZipFile(file_path, "r")  # 解压
-            zip_ref.extractall(processed_path)
-            zip_ref.close()
-        print("Download finished.")
 
 
 # 获取所有数据项
@@ -125,3 +93,7 @@ def index_classes(items):
             idx[i[1]] = len(idx)  # 每个唯一类别都被分配了一个连续的整数索引
     print("== Found %d classes" % len(idx))
     return idx
+
+
+if __name__ == "__main__":
+    omniglot = Omniglot("./omniglot", download=True)
